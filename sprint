@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>진환 스프린트 스케줄러 - Cloud Sync</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getFirestore, doc, setDoc, getDoc, collection, query, onSnapshot, addDoc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+
+        window.FirebaseSDK = { initializeApp, getFirestore, doc, setDoc, getDoc, collection, query, onSnapshot, addDoc, updateDoc, deleteDoc, getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken };
+    </script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;600;700;800&display=swap');
+        body { font-family: 'Pretendard', sans-serif; overflow: hidden; }
+        .custom-scrollbar::-webkit-scrollbar { width: 5px; height: 5px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .modal-bg { background-color: rgba(0, 0, 0, 0.4); backdrop-filter: blur(8px); }
+        .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); }
+        
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fade-in { animation: fadeIn 0.4s ease-out forwards; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+
+        // 아이콘 컴포넌트
+        const IconPlus = () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>;
+        const IconTrash = () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>;
+        const IconCalendar = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>;
+        const IconX = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>;
+        const IconChevronLeft = () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>;
+        const IconChevronRight = () => <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>;
+        const IconCloud = ({ active }) => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={active ? "text-emerald-500" : "text-slate-300"}><path d="M17.5 19c3.037 0 5.5-2.463 5.5-5.5 0-2.77-2.046-5.058-4.71-5.432C17.79 4.312 14.7 2 11 2 7.78 2 5.068 3.868 3.84 6.58 1.71 7.23 0 9.17 0 11.5 0 14.537 2.463 17 5.5 17h12"></path></svg>;
+        const IconGithub = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path></svg>;
+
+        const formatLocalDate = (date) => {
+            if (!date) return "";
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        };
+
+        const App = () => {
+            const [user, setUser] = useState(null);
+            const [tasks, setTasks] = useState([]);
+            const [calendarNotes, setCalendarNotes] = useState({});
+            const [inputValue, setInputValue] = useState('');
+            const [inputDate, setInputDate] = useState(formatLocalDate(new Date()));
+            const [draggedTaskId, setDraggedTaskId] = useState(null);
+            const [viewDate, setViewDate] = useState(new Date());
+            const [modalTask, setModalTask] = useState(null); 
+            const [calendarModal, setCalendarModal] = useState(null);
+            const [guideModal, setGuideModal] = useState(false);
+            const [isLoading, setIsLoading] = useState(true);
+            const [isCloudMode, setIsCloudMode] = useState(false);
+
+            // Firebase 설정 (Canvas 환경 변수 활용)
+            const getFirebaseConfig = () => {
+                try {
+                    return typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+                } catch (e) { return null; }
+            };
+            const firebaseConfig = getFirebaseConfig();
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'jin-sprint-scheduler-v3';
+            
+            useEffect(() => {
+                if (!firebaseConfig) {
+                    const savedTasks = localStorage.getItem('jin-smart-sprint-tasks');
+                    const savedNotes = localStorage.getItem('jin-smart-sprint-notes');
+                    if (savedTasks) setTasks(JSON.parse(savedTasks));
+                    if (savedNotes) setCalendarNotes(JSON.parse(savedNotes));
+                    setIsCloudMode(false);
+                    setIsLoading(false);
+                    return;
+                }
+
+                const { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, getFirestore } = window.FirebaseSDK;
+                
+                try {
+                    const app = initializeApp(firebaseConfig);
+                    const auth = getAuth(app);
+                    const db = getFirestore(app);
+
+                    const initAuth = async () => {
+                        try {
+                            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                                await signInWithCustomToken(auth, __initial_auth_token);
+                            } else {
+                                await signInAnonymously(auth);
+                            }
+                            setIsCloudMode(true);
+                        } catch (error) {
+                            setIsCloudMode(false);
+                            setIsLoading(false);
+                        }
+                    };
+
+                    initAuth();
+                    const unsubscribe = onAuthStateChanged(auth, (u) => {
+                        setUser(u);
+                        if (u) setIsLoading(false);
+                    });
+                    return () => unsubscribe();
+                } catch (e) {
+                    setIsCloudMode(false);
+                    setIsLoading(false);
+                }
+            }, []);
+
+            useEffect(() => {
+                if (!user || !isCloudMode) return;
+                const { getFirestore, collection, query, onSnapshot } = window.FirebaseSDK;
+                const db = getFirestore();
+
+                const tasksQuery = query(collection(db, 'artifacts', appId, 'public', 'data', 'tasks'));
+                const unsubscribeTasks = onSnapshot(tasksQuery, (snapshot) => {
+                    setTasks(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                });
+
+                const notesQuery = query(collection(db, 'artifacts', appId, 'public', 'data', 'notes'));
+                const unsubscribeNotes = onSnapshot(notesQuery, (snapshot) => {
+                    const notesData = {};
+                    snapshot.docs.forEach(doc => { notesData[doc.id] = doc.data().content; });
+                    setCalendarNotes(notesData);
+                });
+
+                return () => { unsubscribeTasks(); unsubscribeNotes(); };
+            }, [user, isCloudMode]);
+
+            useEffect(() => {
+                if (!isCloudMode) {
+                    localStorage.setItem('jin-smart-sprint-tasks', JSON.stringify(tasks));
+                    localStorage.setItem('jin-smart-sprint-notes', JSON.stringify(calendarNotes));
+                }
+            }, [tasks, calendarNotes, isCloudMode]);
+
+            const addTask = async (e) => {
+                e.preventDefault();
+                if (!inputValue.trim()) return;
+                
+                if (isCloudMode && user) {
+                    const { getFirestore, collection, addDoc } = window.FirebaseSDK;
+                    await addDoc(collection(getFirestore(), 'artifacts', appId, 'public', 'data', 'tasks'), {
+                        title: inputValue, status: 'todo', dueDate: inputDate, description: '', createdAt: new Date().toISOString(), userId: user.uid
+                    });
+                } else {
+                    const newTask = { id: Date.now().toString(), title: inputValue, status: 'todo', dueDate: inputDate, description: '', createdAt: new Date().toISOString() };
+                    setTasks([...tasks, newTask]);
+                }
+                setInputValue('');
+            };
+
+            const updateTaskStatus = async (id, status) => {
+                if (isCloudMode) {
+                    const { getFirestore, doc, updateDoc } = window.FirebaseSDK;
+                    await updateDoc(doc(getFirestore(), 'artifacts', appId, 'public', 'data', 'tasks', id), { status });
+                } else {
+                    setTasks(tasks.map(t => t.id === id ? { ...t, status } : t));
+                }
+            };
+
+            const updateTaskDetail = async (id, updates) => {
+                if (isCloudMode) {
+                    const { getFirestore, doc, updateDoc } = window.FirebaseSDK;
+                    await updateDoc(doc(getFirestore(), 'artifacts', appId, 'public', 'data', 'tasks', id), updates);
+                } else {
+                    setTasks(tasks.map(t => t.id === id ? { ...t, ...updates } : t));
+                }
+                if (modalTask && modalTask.id === id) setModalTask({ ...modalTask, ...updates });
+            };
+
+            const deleteTask = async (e, id) => {
+                e.stopPropagation();
+                if(confirm('이 업무를 완전히 삭제할까요?')) {
+                    if (isCloudMode) {
+                        const { getFirestore, doc, deleteDoc } = window.FirebaseSDK;
+                        await deleteDoc(doc(getFirestore(), 'artifacts', appId, 'public', 'data', 'tasks', id));
+                    } else {
+                        setTasks(tasks.filter(t => t.id !== id));
+                    }
+                    if (modalTask && modalTask.id === id) setModalTask(null);
+                }
+            };
+
+            const saveCalendarNote = async (dateStr, content) => {
+                if (isCloudMode) {
+                    const { getFirestore, doc, setDoc } = window.FirebaseSDK;
+                    await setDoc(doc(getFirestore(), 'artifacts', appId, 'public', 'data', 'notes', dateStr), { content });
+                } else {
+                    setCalendarNotes({...calendarNotes, [dateStr]: content});
+                }
+            };
+
+            const daysInMonth = useMemo(() => {
+                const year = viewDate.getFullYear();
+                const month = viewDate.getMonth();
+                const firstDayIdx = new Date(year, month, 1).getDay();
+                const lastDate = new Date(year, month + 1, 0).getDate();
+                const result = [];
+                for (let i = 0; i < firstDayIdx; i++) result.push(null);
+                for (let i = 1; i <= lastDate; i++) result.push(new Date(year, month, i, 12, 0, 0));
+                return result;
+            }, [viewDate]);
+
+            const changeMonth = (offset) => setViewDate(new Date(viewDate.getFullYear(), viewDate.getMonth() + offset, 1));
+            const onDragStart = (id) => setDraggedTaskId(id);
+            const onDragOver = (e) => e.preventDefault();
+            const onDrop = (status) => {
+                if (!draggedTaskId) return;
+                updateTaskStatus(draggedTaskId, status);
+                setDraggedTaskId(null);
+            };
+
+            const getTasksForDate = (dateStr) => tasks.filter(t => t.dueDate === dateStr);
+            const todayStr = formatLocalDate(new Date());
+
+            if (isLoading) {
+                return (
+                    <div className="h-screen w-screen flex items-center justify-center bg-slate-50">
+                        <div className="flex flex-col items-center gap-4">
+                            <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+                            <p className="font-black text-slate-400 animate-pulse tracking-widest text-xs uppercase">Connecting System...</p>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="flex h-screen overflow-hidden bg-slate-50">
+                    
+                    {/* LEFT SIDEBAR: CALENDAR */}
+                    <aside className="w-[320px] xl:w-[400px] bg-white border-r border-slate-200 p-6 flex-shrink-0 flex flex-col hidden lg:flex shadow-sm">
+                        <div className="flex items-center justify-between mb-8">
+                            <div className="flex items-center gap-3">
+                                <div className="p-3 bg-indigo-600 text-white rounded-2xl shadow-lg">
+                                    <IconCalendar />
+                                </div>
+                                <div>
+                                    <h2 className="text-xl font-black text-slate-800 tracking-tight">달력</h2>
+                                    <div className="flex items-center gap-1 mt-0.5">
+                                        <IconCloud active={isCloudMode} />
+                                        <span className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">
+                                            {isCloudMode ? "Cloud Connected" : "Local Mode Only"}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                            <button onClick={() => setGuideModal(true)} className="p-2.5 bg-slate-50 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all group flex items-center gap-2">
+                                <IconGithub />
+                                <span className="text-[10px] font-black uppercase tracking-wider hidden xl:inline">GitHub 가이드</span>
+                            </button>
+                        </div>
+
+                        <div className="flex justify-between items-center mb-6">
+                            <span className="font-extrabold text-slate-700 text-lg">{viewDate.getFullYear()}년 {viewDate.getMonth() + 1}월</span>
+                            <div className="flex gap-1">
+                                <button onClick={() => changeMonth(-1)} className="p-2 hover:bg-slate-100 rounded-xl text-slate-400 transition-colors"><IconChevronLeft /></button>
+                                <button onClick={() => changeMonth(1)} className="p-2 hover:bg-slate-100 rounded-xl text-slate-400 transition-colors"><IconChevronRight /></button>
+                            </div>
+                        </div>
+
+                        <div className="calendar-grid text-[11px] font-black text-slate-300 mb-3 uppercase text-center tracking-widest px-1">
+                            {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => <div key={d}>{d}</div>)}
+                        </div>
+                        <div className="calendar-grid gap-2 flex-1 overflow-y-auto custom-scrollbar pr-1">
+                            {daysInMonth.map((day, idx) => {
+                                if (!day) return <div key={`empty-${idx}`} className="h-24"></div>;
+                                const dateStr = formatLocalDate(day);
+                                const dayTasks = getTasksForDate(dateStr);
+                                const hasNote = !!calendarNotes[dateStr];
+                                const isToday = todayStr === dateStr;
+
+                                return (
+                                    <button key={dateStr} onClick={() => setCalendarModal({ dateStr })}
+                                        className={`h-24 rounded-xl p-1.5 flex flex-col items-center border transition-all overflow-hidden ${isToday ? 'border-indigo-600 bg-indigo-50/30 ring-1 ring-indigo-600' : 'border-slate-100 hover:border-indigo-300 hover:bg-slate-50'} ${dayTasks.length || hasNote ? 'bg-white shadow-sm' : ''}`}
+                                    >
+                                        <span className={`text-[10px] font-bold mb-1 ${isToday ? 'text-indigo-600' : 'text-slate-400'}`}>{day.getDate()}</span>
+                                        <div className="w-full space-y-0.5 mt-0.5 px-0.5 overflow-hidden">
+                                            {dayTasks.slice(0, 2).map(t => (
+                                                <div key={t.id} className={`text-[7px] px-1 py-0.5 rounded-md truncate text-left font-black ${t.status === 'done' ? 'bg-emerald-50 text-emerald-600' : 'bg-indigo-50 text-indigo-600'}`}>
+                                                    {t.title}
+                                                </div>
+                                            ))}
+                                            {dayTasks.length > 2 && <div className="text-[7px] text-slate-300 font-bold text-center">+{dayTasks.length - 2}</div>}
+                                            {hasNote && dayTasks.length <= 2 && <div className="w-1.5 h-1.5 bg-amber-400 rounded-full mx-auto mt-1"></div>}
+                                        </div>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </aside>
+
+                    {/* MAIN CONTENT: KANBAN */}
+                    <main className="flex-1 flex flex-col min-w-0 bg-slate-50/50">
+                        <header className="p-6 md:p-8 bg-white/60 backdrop-blur-xl border-b border-slate-200">
+                            <div className="max-w-7xl mx-auto flex flex-col xl:flex-row xl:items-end justify-between gap-6">
+                                <div>
+                                    <h1 className="text-3xl font-black text-slate-900 tracking-tightest flex items-center gap-3">
+                                        진환 스케줄러 <span className={`text-[10px] px-2 py-0.5 rounded-md font-bold uppercase tracking-widest ${isCloudMode ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-200 text-slate-500'}`}>{isCloudMode ? 'Live Sync' : 'Local Mode'}</span>
+                                    </h1>
+                                    <p className="text-slate-400 font-bold text-[10px] uppercase tracking-widest mt-2 flex items-center gap-2">
+                                        <span className="w-6 h-[2px] bg-indigo-500"></span>
+                                        SPRINT DASHBOARD
+                                    </p>
+                                </div>
+                                <form onSubmit={addTask} className="bg-white p-2 rounded-2xl shadow-2xl shadow-slate-200/60 border border-slate-100 flex flex-col sm:flex-row items-center gap-2 overflow-hidden">
+                                    <div className="flex items-center gap-3 px-4 sm:border-r border-slate-100 py-1 bg-slate-50/50 rounded-xl">
+                                        <IconCalendar />
+                                        <input type="date" value={inputDate} onChange={(e) => setInputDate(e.target.value)} className="text-xs font-black text-slate-600 focus:outline-none bg-transparent"/>
+                                    </div>
+                                    <input type="text" value={inputValue} onChange={(e) => setInputValue(e.target.value)} placeholder="새로운 업무 입력..." className="flex-1 px-4 py-2 text-sm font-bold focus:outline-none w-full sm:w-80"/>
+                                    <button type="submit" className="w-full sm:w-auto bg-indigo-600 text-white px-8 py-3 rounded-xl hover:bg-indigo-700 flex items-center justify-center gap-2 font-black shadow-lg shadow-indigo-200 transition-all active:scale-95">
+                                        <IconPlus /><span>등록</span>
+                                    </button>
+                                </form>
+                            </div>
+                        </header>
+
+                        <div className="flex-1 flex flex-row gap-6 p-6 md:p-8 overflow-x-auto custom-scrollbar">
+                            {['todo', 'progress', 'done'].map(statusId => {
+                                const col = {
+                                    todo: { title: 'To-do', color: 'bg-indigo-500', text: 'text-indigo-600', border: 'border-indigo-100' },
+                                    progress: { title: 'In Progress', color: 'bg-amber-500', text: 'text-amber-600', border: 'border-amber-100' },
+                                    done: { title: 'Done', color: 'bg-emerald-500', text: 'text-emerald-600', border: 'border-emerald-100' }
+                                }[statusId];
+                                return (
+                                    <div key={statusId} onDragOver={onDragOver} onDrop={() => onDrop(statusId)} className="flex-none w-[320px] md:w-[380px] flex flex-col bg-white/40 rounded-[32px] border border-slate-200/60 overflow-hidden shadow-inner">
+                                        <div className={`px-8 py-5 flex items-center justify-between border-b bg-white/80 backdrop-blur-md ${col.border}`}>
+                                            <div className="flex items-center gap-4">
+                                                <div className={`w-3 h-3 rounded-full ${col.color} ring-4 ring-white shadow-md shadow-black/5`}></div>
+                                                <h2 className={`font-black uppercase tracking-[0.2em] text-[11px] ${col.text}`}>{col.title}</h2>
+                                            </div>
+                                            <span className="text-[10px] font-black bg-slate-900 text-white px-2.5 py-0.5 rounded-full">{tasks.filter(t => t.status === statusId).length}</span>
+                                        </div>
+                                        <div className="flex-1 p-5 overflow-y-auto space-y-4 custom-scrollbar">
+                                            {tasks.filter(t => t.status === statusId).map(task => (
+                                                <div key={task.id} draggable onDragStart={() => onDragStart(task.id)} onClick={() => setModalTask(task)}
+                                                    className={`group bg-white p-5 rounded-[24px] shadow-sm border border-slate-100 cursor-pointer hover:border-indigo-400 hover:shadow-xl hover:shadow-indigo-500/5 transition-all duration-300 relative animate-fade-in ${draggedTaskId === task.id ? 'opacity-30 scale-95' : 'opacity-100'}`}
+                                                >
+                                                    <button onClick={(e) => deleteTask(e, task.id)} className="absolute top-4 right-4 text-slate-200 hover:text-red-500 transition-all opacity-0 group-hover:opacity-100 p-1.5 bg-white rounded-full shadow-sm"><IconTrash /></button>
+                                                    <h3 className="font-bold text-slate-800 leading-tight mb-4 pr-8 text-sm tracking-tight">{task.title}</h3>
+                                                    <div className="flex items-center gap-2.5 text-[9px] font-black text-slate-400 uppercase tracking-widest bg-slate-50 w-fit px-3 py-1.5 rounded-full border border-slate-100">
+                                                        <IconCalendar /><span>{task.dueDate}</span>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                            {tasks.filter(t => t.status === statusId).length === 0 && (
+                                                <div className="h-32 border-2 border-dashed border-slate-200 rounded-[24px] flex items-center justify-center text-slate-300 text-[10px] font-black uppercase italic tracking-widest">No Items</div>
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </main>
+
+                    {/* MODAL: TASK DETAIL */}
+                    {modalTask && (
+                        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 modal-bg" onClick={() => setModalTask(null)}>
+                            <div className="bg-white rounded-[32px] shadow-2xl w-full max-w-xl overflow-hidden animate-fade-in" onClick={e => e.stopPropagation()}>
+                                <div className="p-8 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
+                                    <h2 className="text-xl font-black text-slate-900 leading-tight tracking-tight pr-10">{modalTask.title}</h2>
+                                    <button onClick={() => setModalTask(null)} className="text-slate-300 hover:text-slate-900 transition-colors bg-white p-2 rounded-full shadow-sm flex-shrink-0"><IconX /></button>
+                                </div>
+                                <div className="p-8 space-y-6">
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">마감 기한</label>
+                                            <input type="date" value={modalTask.dueDate} onChange={(e) => updateTaskDetail(modalTask.id, { dueDate: e.target.value })} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-xl font-bold focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all"/>
+                                        </div>
+                                        <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">진행 상태</label>
+                                            <select value={modalTask.status} onChange={(e) => updateTaskDetail(modalTask.id, { status: e.target.value })} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-xl font-bold focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all">
+                                                <option value="todo">To-do</option>
+                                                <option value="progress">In Progress</option>
+                                                <option value="done">Done</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">상세 내용 (자동 저장)</label>
+                                        <textarea value={modalTask.description || ''} onChange={(e) => updateTaskDetail(modalTask.id, { description: e.target.value })} placeholder="내용을 기록하세요..." className="w-full h-40 p-5 bg-slate-50 border border-slate-100 rounded-[24px] focus:ring-4 focus:ring-indigo-500/10 outline-none resize-none text-sm font-medium leading-relaxed"></textarea>
+                                    </div>
+                                </div>
+                                <div className="p-6 bg-slate-50 flex justify-end px-8"><button onClick={() => setModalTask(null)} className="px-10 py-3.5 rounded-xl font-black bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg shadow-indigo-100 transition-all active:scale-95">닫기</button></div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* MODAL: CALENDAR REVIEW */}
+                    {calendarModal && (
+                        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 modal-bg" onClick={() => setCalendarModal(null)}>
+                            <div className="bg-white rounded-[32px] shadow-2xl w-full max-w-lg overflow-hidden animate-fade-in" onClick={e => e.stopPropagation()}>
+                                <div className="p-7 border-b border-slate-100 bg-indigo-600 text-white flex justify-between items-center">
+                                    <div><p className="text-[9px] font-black uppercase tracking-[0.2em] opacity-80 mb-1">{isCloudMode ? "Cloud Note" : "Local Note"}</p><h2 className="text-xl font-black tracking-tight">{calendarModal.dateStr}</h2></div>
+                                    <button onClick={() => setCalendarModal(null)} className="text-white/70 hover:text-white bg-white/10 p-2 rounded-full"><IconX /></button>
+                                </div>
+                                <div className="p-8 space-y-6">
+                                    <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">공지사항 및 메모</label>
+                                        <textarea value={calendarNotes[calendarModal.dateStr] || ''} onChange={(e) => saveCalendarNote(calendarModal.dateStr, e.target.value)} placeholder="메모를 기록하세요..." className="w-full h-28 p-5 bg-slate-50 border border-slate-100 rounded-xl focus:ring-4 focus:ring-indigo-500/10 outline-none text-sm font-bold tracking-tight"></textarea>
+                                    </div>
+                                    <div className="space-y-3"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">연동된 업무 ({getTasksForDate(calendarModal.dateStr).length})</label>
+                                        <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar pr-1">
+                                            {getTasksForDate(calendarModal.dateStr).map(t => (
+                                                <div key={t.id} onClick={() => { setModalTask(t); setCalendarModal(null); }} className="p-4 bg-slate-50 border border-slate-100 rounded-xl flex items-center justify-between cursor-pointer hover:bg-white hover:shadow-md hover:border-indigo-200 group transition-all">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className={`w-2 h-2 rounded-full ${t.status === 'done' ? 'bg-emerald-500' : 'bg-indigo-500'} shadow-sm`}></div>
+                                                        <span className={`text-xs font-black tracking-tight ${t.status === 'done' ? 'text-slate-300 line-through font-medium' : 'text-slate-700'}`}>{t.title}</span>
+                                                    </div>
+                                                    <span className="text-[8px] font-black text-slate-300 group-hover:text-indigo-600 transition-colors uppercase tracking-widest">Detail</span>
+                                                </div>
+                                            ))}
+                                            {getTasksForDate(calendarModal.dateStr).length === 0 && <p className="text-center text-[10px] text-slate-300 py-4 font-bold italic uppercase tracking-widest">No Linked Tasks</p>}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="p-6 bg-slate-50 px-8"><button onClick={() => setCalendarModal(null)} className="w-full py-3.5 rounded-xl font-black bg-slate-900 text-white hover:bg-black transition-all">확인 완료</button></div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* GUIDE MODAL: GITHUB PAGES */}
+                    {guideModal && (
+                        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 modal-bg" onClick={() => setGuideModal(false)}>
+                            <div className="bg-white rounded-[32px] shadow-2xl w-full max-w-2xl overflow-hidden animate-fade-in" onClick={e => e.stopPropagation()}>
+                                <div className="p-8 border-b border-slate-100 bg-slate-900 text-white flex justify-between items-center">
+                                    <div className="flex items-center gap-4">
+                                        <IconGithub />
+                                        <h2 className="text-xl font-black tracking-tight">나만의 스케줄러 주소 만들기 (GitHub)</h2>
+                                    </div>
+                                    <button onClick={() => setGuideModal(false)} className="text-white/50 hover:text-white bg-white/10 p-2 rounded-full"><IconX /></button>
+                                </div>
+                                <div className="p-8 space-y-6 overflow-y-auto max-h-[70vh] custom-scrollbar">
+                                    <p className="text-slate-600 text-sm font-medium leading-relaxed">
+                                        GitHub Pages를 사용하면 이 스케줄러를 인터넷 주소로 무료 호스팅할 수 있습니다. 
+                                        동일한 주소로 스마트폰, 다른 PC에서 접속하면 모든 데이터가 실시간으로 동기화됩니다.
+                                    </p>
+                                    
+                                    <div className="space-y-4">
+                                        <h3 className="font-black text-slate-800 flex items-center gap-2">
+                                            <span className="bg-indigo-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-[10px]">1</span>
+                                            GitHub 가입 및 저장소 생성
+                                        </h3>
+                                        <ul className="text-xs text-slate-500 space-y-2 list-disc pl-10 font-medium">
+                                            <li><a href="https://github.com" target="_blank" className="text-indigo-600 font-bold underline">GitHub.com</a>에 가입합니다.</li>
+                                            <li>우측 상단 <b>+</b> 버튼 클릭 후 <b>New repository</b>를 선택합니다.</li>
+                                            <li>Repository name에 <code className="bg-slate-100 px-1 rounded text-slate-800">scheduler</code> 등을 입력하고 <b>Create repository</b>를 누릅니다.</li>
+                                        </ul>
+                                    </div>
+
+                                    <div className="space-y-4">
+                                        <h3 className="font-black text-slate-800 flex items-center gap-2">
+                                            <span className="bg-indigo-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-[10px]">2</span>
+                                            파일 업로드
+                                        </h3>
+                                        <ul className="text-xs text-slate-500 space-y-2 list-disc pl-10 font-medium">
+                                            <li>현재 이 파일(index.html)을 컴퓨터에 저장합니다.</li>
+                                            <li>GitHub 저장소 화면에서 <b>uploading an existing file</b> 링크를 클릭합니다.</li>
+                                            <li>저장한 <code className="bg-slate-100 px-1 rounded text-slate-800">index.html</code> 파일을 드래그하여 올리고 <b>Commit changes</b>를 누릅니다.</li>
+                                        </ul>
+                                    </div>
+
+                                    <div className="space-y-4">
+                                        <h3 className="font-black text-slate-800 flex items-center gap-2">
+                                            <span className="bg-indigo-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-[10px]">3</span>
+                                            주소 활성화
+                                        </h3>
+                                        <ul className="text-xs text-slate-500 space-y-2 list-disc pl-10 font-medium">
+                                            <li>저장소 상단 메뉴의 <b>Settings</b>로 이동합니다.</li>
+                                            <li>왼쪽 사이드바에서 <b>Pages</b>를 클릭합니다.</li>
+                                            <li><b>Build and deployment</b> 섹션에서 Branch를 <code className="bg-slate-100 px-1 rounded text-slate-800">main</code>으로 설정하고 <b>Save</b>를 누릅니다.</li>
+                                            <li>약 1~2분 후 상단에 <b>"Your site is live at..."</b> 이라는 주소가 생성됩니다!</li>
+                                        </ul>
+                                    </div>
+
+                                    <div className="p-4 bg-indigo-50 rounded-2xl border border-indigo-100">
+                                        <p className="text-indigo-600 text-[11px] font-black uppercase tracking-widest mb-1">PRO TIP</p>
+                                        <p className="text-indigo-900 text-xs font-bold">이제 생성된 주소로 어디서든 접속하세요. 데이터는 클라우드 동기화 모드가 켜져 있다면 자동으로 공유됩니다.</p>
+                                    </div>
+                                </div>
+                                <div className="p-6 bg-slate-50 px-8 flex justify-center">
+                                    <button onClick={() => setGuideModal(false)} className="w-full py-4 rounded-2xl font-black bg-slate-900 text-white hover:bg-black transition-all shadow-xl shadow-slate-200">가이드 닫기</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
